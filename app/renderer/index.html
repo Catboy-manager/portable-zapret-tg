@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ZapretTG Portable</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">ZT</div>
+        <div>
+          <div class="brand-title">ZapretTG</div>
+          <div class="brand-sub">Portable Control Center</div>
+        </div>
+      </div>
+
+      <div class="nav-hint">Состояние</div>
+      <div class="status-list">
+        <div class="status-pill"><span class="dot" id="dotAdmin"></span><div><div class="pill-label">Права</div><div class="pill-value" id="sideAdmin">—</div></div></div>
+        <div class="status-pill"><span class="dot" id="dotWinws"></span><div><div class="pill-label">Bypass</div><div class="pill-value" id="sideWinws">—</div></div></div>
+        <div class="status-pill"><span class="dot" id="dotService"></span><div><div class="pill-label">Служба</div><div class="pill-value" id="sideService">—</div></div></div>
+        <div class="status-pill"><span class="dot" id="dotTg"></span><div><div class="pill-label">Telegram Proxy</div><div class="pill-value" id="sideTg">—</div></div></div>
+        <div class="status-pill"><span class="dot" id="dotMon"></span><div><div class="pill-label">Мониторинг</div><div class="pill-value" id="sideMon">—</div></div></div>
+      </div>
+
+      <div class="sidebar-note">
+        <div class="note-title">Важно</div>
+        <div class="note-text">Для winws/WinDivert и службы Windows запускайте приложение от имени администратора.</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="hero">
+        <div>
+          <h1>Управление обходом</h1>
+          <p>Discord, YouTube, Telegram. Все профили <code>general*.bat</code> и все списки <code>lists/*</code> из runtime.</p>
+        </div>
+        <div class="hero-actions">
+          <button id="btnRefresh" class="btn ghost">????????</button>
+          <button id="btnProbe" class="btn ghost">????????? ??????</button>
+        </div>
+      </header>
+
+      <div id="adminBanner" class="banner warn hidden">
+        <div>
+          <strong>Нет прав администратора.</strong> Запуск winws/WinDivert и управление службой будут недоступны. Закройте приложение и запустите <code>ZapretTG.exe</code> от имени администратора.
+        </div>
+      </div>
+      <div id="banner" class="banner info">Готово.</div>
+
+      <section class="cards">
+        <article class="card card-main">
+          <div class="card-head">
+            <div>
+              <h2>Профиль и режим</h2>
+              <div class="muted">Ручной выбор имеет приоритет. Автоподбор используется только при деградации/по запросу.</div>
+            </div>
+            <div class="segmented" id="modeSegment">
+              <button data-mode="user" class="seg active">Пользователь</button>
+              <button data-mode="service" class="seg">Служба</button>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <label class="field">
+              <span>Текущий профиль</span>
+              <select id="profileSelect"></select>
+            </label>
+            <div class="field">
+              <span>Быстрое действие</span>
+              <div class="actions">
+                <button id="btnApply" class="btn primary">????????? ???????</button>
+                <button id="btnStopBypass" class="btn danger">?????????? bypass</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="actions wrap">
+            <button id="btnInstallService" class="btn">??????????/????????? ??????</button>
+            <button id="btnRemoveService" class="btn ghost">??????? ??????</button>
+            <button id="btnAutoSwitch" class="btn ghost">????-??????</button>
+            <button class="btn" id="btnManualLock">Ручной lock: ВЫКЛ</button>
+            <span class="small" id="manualLockInfo"></span>
+          </div>
+
+          <div class="hint" id="modeHint">Пользовательский режим запускает winws как процесс. Служба использует логику service.bat (sc create/start, реестр стратегии).</div>
+        </article>
+
+        <article class="card">
+          <div class="card-head"><div><h2>Telegram MTProto</h2><div class="muted">Внешний процесс <code>TgWsProxy_windows.exe</code></div></div></div>
+          <div class="field-row">
+            <label class="field"><span>Host</span><input id="tgHost" type="text" /></label>
+            <label class="field"><span>Port</span><input id="tgPort" type="number" /></label>
+          </div>
+          <label class="field"><span>Secret</span><input id="tgSecret" type="text" /></label>
+          <div class="actions wrap">
+            <button id="btnStartTg" class="btn primary">????????? TG</button>
+            <button id="btnStopTg" class="btn ghost">?????????? TG</button>
+            <button id="btnSaveTg" class="btn ghost">????????? TG</button>
+          </div>
+          <div class="endpoint" id="tgLinkInline">—</div>
+        </article>
+
+        <article class="card">
+          <div class="card-head"><div><h2>Мониторинг</h2><div class="muted">Тихие проверки без перезапуска winws</div></div></div>
+          <div class="field-row">
+            <label class="field"><span>Интервал, сек</span><input id="monInterval" type="number" min="30" step="10"></label>
+            <label class="field"><span>Таймаут, мс</span><input id="monTimeout" type="number" min="1000" step="500"></label>
+          </div>
+          <div class="field-row">
+            <label class="field"><span>Порог фейлов</span><input id="monFail" type="number" min="1" step="1"></label>
+            <label class="field"><span>Cooldown, сек</span><input id="monCooldown" type="number" min="60" step="30"></label>
+          </div>
+          <div class="checks">
+            <label class="check"><input id="chkAutoSwitch" type="checkbox"> Автопереключение при деградации</label>
+            <label class="check"><input id="chkAutoSelect" type="checkbox"> Автоприменение последнего профиля при старте</label>
+            <label class="check"><input id="chkTgAuto" type="checkbox"> Автозапуск TgWsProxy</label>
+          </div>
+          <div class="actions"><button id="btnSaveMon" class="btn">????????? ??????????</button></div>
+        </article>
+
+        <article class="card wide">
+          <div class="card-head"><div><h2>Диагностика целей</h2><div class="muted" id="lastCheckMeta">Проверка ещё не выполнялась</div></div></div>
+          <div id="checkResults" class="results"></div>
+          <div id="statsSummary" class="muted small"></div>
+        </article>
+
+        <article class="card wide">
+          <div class="card-head"><div><h2>Логи</h2><div class="muted">Последние события приложения</div></div><button id="btnReloadLogs" class="btn ghost">???????? ????</button></div>
+          <pre id="logView" class="logview"></pre>
+        </article>
+      </section>
+    </main>
+  </div>
+  <script src="renderer.js"></script>
+</body>
+</html>

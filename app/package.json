@@ -1,0 +1,47 @@
+{
+  "name": "portable-zapret-tg",
+  "version": "1.0.0",
+  "description": "Portable controller for zapret (winws) and TgWsProxy with quiet auto-switching",
+  "main": "main.js",
+  "author": "local",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "pack:dir": "electron-builder --win dir --x64",
+    "pack:portable": "electron-builder --win portable --x64"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "local.zapret.tg.controller",
+    "productName": "ZapretTG",
+    "directories": {
+      "output": "../dist3"
+    },
+    "files": [
+      "**/*"
+    ],
+    "asar": true,
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "extraFiles": [
+      {
+        "from": "../runtime",
+        "to": "runtime"
+      }
+    ],
+    "forceCodeSigning": false
+  }
+}
