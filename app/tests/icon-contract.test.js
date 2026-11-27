@@ -26,3 +26,11 @@ test('packaged resources include icon.ico', () => {
     'missing build/icon.ico -> resources/icon.ico mapping',
   );
 });
+
+test('electron builder is allowed to edit the EXE icon resource', () => {
+  assert.notEqual(
+    pkg.build && pkg.build.win && pkg.build.win.signAndEditExecutable,
+    false,
+    'signAndEditExecutable=false blocks the EXE icon resource update',
+  );
+});
