@@ -21,6 +21,7 @@
       <div class="nav-hint">Состояние</div>
       <div class="status-list">
         <div class="status-pill"><span class="dot" id="dotAdmin"></span><div><div class="pill-label">Права</div><div class="pill-value" id="sideAdmin">—</div></div></div>
+        <div class="status-pill"><span class="dot" id="dotVoice"></span><div><div class="pill-label">Голос Discord</div><div class="pill-value" id="sideVoice">—</div></div></div>
         <div class="status-pill"><span class="dot" id="dotWinws"></span><div><div class="pill-label">Bypass</div><div class="pill-value" id="sideWinws">—</div></div></div>
         <div class="status-pill"><span class="dot" id="dotService"></span><div><div class="pill-label">Служба</div><div class="pill-value" id="sideService">—</div></div></div>
         <div class="status-pill"><span class="dot" id="dotTg"></span><div><div class="pill-label">Telegram Proxy</div><div class="pill-value" id="sideTg">—</div></div></div>
@@ -40,8 +41,42 @@
           <p>Discord, YouTube, Telegram. Все профили <code>general*.bat</code> и все списки <code>lists/*</code> из runtime.</p>
         </div>
         <div class="hero-actions">
-          <button id="btnRefresh" class="btn ghost">????????</button>
-          <button id="btnProbe" class="btn ghost">????????? ??????</button>
+          <button id="btnRefresh" class="btn ghost">Обновить</button>
+            <button id="btnExportDiag" class="btn ghost">Экспорт диагностики</button>
+          <button id="btnProbe" class="btn ghost">Проверить сейчас</button>
+          <div class="help-wrap">
+            <button id="btnHelp" class="help-btn" type="button" aria-label="Подсказка по кнопкам" aria-describedby="helpPanel">?</button>
+            <div id="helpPanel" class="help-panel" role="tooltip">
+              <div class="help-title">Порядок работы</div>
+              <ol class="help-steps">
+                <li>Запустите приложение от имени администратора: появится UAC. Без прав недоступны winws/WinDivert и служба.</li>
+                <li>Выберите режим: «Пользователь» — обычный процесс, «Служба» — установка и запуск через service.bat.</li>
+                <li>Выберите профиль <code>general*.bat</code> и нажмите «Применить профиль» — ручной выбор имеет приоритет.</li>
+                <li>«Проверить сейчас» — тихая проверка текущих целей. «Проверить все профили» — полная матрица всех профилей.</li>
+                <li>«Авто-подбор» — разовая смена на лучший профиль. Если голос Discord активен, автоматическая смена откладывается. «Ручной lock» фиксирует текущий выбор.</li>
+                <li>В карточке Telegram нажмите «Запустить TG», затем «Сохранить TG» — ссылка для t.me появится ниже.</li>
+                <li>При проблеме откройте «Логи» или «Экспорт диагностики» — записи обезличены.</li>
+              </ol>
+              <div class="help-title">Кнопки</div>
+              <dl class="help-keys">
+                <dt>Обновить</dt><dd>Перечитать состояние и настройки без перезапуска bypass.</dd>
+                <dt>Экспорт диагностики</dt><dd>Выгрузить историю и телеметрию без секретов и тел пакетов.</dd>
+                <dt>Проверить сейчас</dt><dd>Тихий зонд health-целей текущим профилем; успех только при HTTP 2xx.</dd>
+                <dt>Применить профиль</dt><dd>Вручную запустить выбранный профиль; перекрывает автоматический выбор.</dd>
+                <dt>Остановить bypass</dt><dd>Остановить winws и, если включён, режим службы.</dd>
+                <dt>Установить/запустить службу</dt><dd>Создать службу Windows с выбранным профилем и сразу её запустить.</dd>
+                <dt>Удалить службу</dt><dd>Удалить созданную службу и вернуть управление пользовательскому процессу.</dd>
+                <dt>Авто-подбор</dt><dd>Однократно выбрать лучше профиль по последним проверкам. При голосе Discord откладывается.</dd>
+                <dt>Ручной lock</dt><dd>Запретить автоматическую смену профиля, пока lock включён.</dd>
+                <dt>Запустить / Остановить / Сохранить TG</dt><dd>Управлять внешним TgWsProxy и сохранить его настройки.</dd>
+                <dt>Сохранить мониторинг</dt><dd>Применить интервал, тайм-аут, порог фейлов и cooldown тихих проверок.</dd>
+                <dt>Проверить все профили</dt><dd>Прогнать все профили последовательно: победитель применяется только в конце; при голосе Discord прогон не стартует.</dd>
+                <dt>Отмена</dt><dd>Остановить полный прогон. Отменённый прогон не применяет победителя и не меняет сохранённый профиль.</dd>
+                <dt>Обновить матрицу / ленту / логи</dt><dd>Перечитать таблицу результатов, ленту событий и лог приложения.</dd>
+                <dt>Фильтры «Все / Цели / Профили / События»</dt><dd>Сузить ленту диагностики до нужного типа записей.</dd>
+              </dl>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -51,6 +86,7 @@
         </div>
       </div>
       <div id="banner" class="banner info">Готово.</div>
+      <div id="voiceBanner" class="banner warn hidden">Голос Discord активен — автоматическое переключение профиля отложено. Ручной выбор профиля доступен.</div>
 
       <section class="cards">
         <article class="card card-main">
@@ -73,16 +109,16 @@
             <div class="field">
               <span>Быстрое действие</span>
               <div class="actions">
-                <button id="btnApply" class="btn primary">????????? ???????</button>
-                <button id="btnStopBypass" class="btn danger">?????????? bypass</button>
+                <button id="btnApply" class="btn primary">Применить профиль</button>
+                <button id="btnStopBypass" class="btn danger">Остановить bypass</button>
               </div>
             </div>
           </div>
 
           <div class="actions wrap">
-            <button id="btnInstallService" class="btn">??????????/????????? ??????</button>
-            <button id="btnRemoveService" class="btn ghost">??????? ??????</button>
-            <button id="btnAutoSwitch" class="btn ghost">????-??????</button>
+            <button id="btnInstallService" class="btn">Установить/запустить службу</button>
+            <button id="btnRemoveService" class="btn ghost">Удалить службу</button>
+            <button id="btnAutoSwitch" class="btn ghost">Авто-подбор</button>
             <button class="btn" id="btnManualLock">Ручной lock: ВЫКЛ</button>
             <span class="small" id="manualLockInfo"></span>
           </div>
@@ -98,9 +134,9 @@
           </div>
           <label class="field"><span>Secret</span><input id="tgSecret" type="text" /></label>
           <div class="actions wrap">
-            <button id="btnStartTg" class="btn primary">????????? TG</button>
-            <button id="btnStopTg" class="btn ghost">?????????? TG</button>
-            <button id="btnSaveTg" class="btn ghost">????????? TG</button>
+            <button id="btnStartTg" class="btn primary">Запустить TG</button>
+            <button id="btnStopTg" class="btn ghost">Остановить TG</button>
+            <button id="btnSaveTg" class="btn ghost">Сохранить TG</button>
           </div>
           <div class="endpoint" id="tgLinkInline">—</div>
         </article>
@@ -119,22 +155,60 @@
             <label class="check"><input id="chkAutoSwitch" type="checkbox"> Автопереключение при деградации</label>
             <label class="check"><input id="chkAutoSelect" type="checkbox"> Автоприменение последнего профиля при старте</label>
             <label class="check"><input id="chkTgAuto" type="checkbox"> Автозапуск TgWsProxy</label>
+            <label class="check"><input id="chkTelemetry" type="checkbox"> Подробная телеметрия (локально)</label>
           </div>
-          <div class="actions"><button id="btnSaveMon" class="btn">????????? ??????????</button></div>
+          <div class="actions"><button id="btnSaveMon" class="btn">Сохранить мониторинг</button></div>
         </article>
 
-        <article class="card wide">
-          <div class="card-head"><div><h2>Диагностика целей</h2><div class="muted" id="lastCheckMeta">Проверка ещё не выполнялась</div></div></div>
-          <div id="checkResults" class="results"></div>
+        <article class="card wide" id="matrixCard">
+          <div class="card-head">
+            <div>
+              <h2>Профили и результаты тестов</h2>
+              <div class="muted" id="lastCheckMeta">Проверка ещё не выполнялась</div>
+            </div>
+            <div class="diag-toolbar">
+              <button type="button" class="btn primary" id="btnRunAll">Проверить все профили</button>
+              <button type="button" class="btn ghost" id="btnCancelRunAll" disabled>Отмена</button>
+              <button type="button" class="btn ghost" id="btnMatrixRefresh">Обновить</button>
+            </div>
+          </div>
+          <div class="run-progress hidden" id="runProgress"></div>
+          <div class="diag-table-wrap">
+            <table class="matrix-table">
+              <thead><tr id="matrixHead"><th>Профиль</th></tr></thead>
+              <tbody id="matrixBody"><tr><td class="diag-empty">Нет данных</td></tr></tbody>
+            </table>
+          </div>
+          <div class="muted small" id="matrixSummary">Профилей проверено: <span id="matrixTested">0</span> из <span id="matrixTotal">0</span>. Ячейка показывает последний результат 2xx; зелёный — успех, красный — ошибка, серый — нет данных.</div>
+        </article>
+
+        <details class="card wide" id="eventCard">
+          <summary>Лента событий и подробная диагностика (последние проверки)</summary>
+          <div class="card-head">
+            <div><h2>Диагностика целей</h2><div class="muted">Сырые события без секретов; подробности по каждой проверке</div></div>
+            <div class="diag-toolbar" id="diagFilter">
+              <button type="button" class="btn ghost active" data-filter="all">Все</button>
+              <button type="button" class="btn ghost" data-filter="target">Цели</button>
+              <button type="button" class="btn ghost" data-filter="profile">Профили</button>
+              <button type="button" class="btn ghost" data-filter="event">События</button>
+              <button type="button" class="btn ghost" id="btnDiagRefresh">Обновить</button>
+            </div>
+          </div>
+          <div class="diag-table-wrap">
+            <table class="diag-table">
+              <thead><tr><th>Время</th><th>Тип</th><th>Цель / профиль</th><th>Результат</th><th>Детали</th></tr></thead>
+              <tbody id="diagRows"><tr><td colspan="5" class="diag-empty">Нет данных</td></tr></tbody>
+            </table>
+          </div>
           <div id="statsSummary" class="muted small"></div>
-        </article>
+        </details>
 
         <article class="card wide">
-          <div class="card-head"><div><h2>Логи</h2><div class="muted">Последние события приложения</div></div><button id="btnReloadLogs" class="btn ghost">???????? ????</button></div>
+          <div class="card-head"><div><h2>Логи</h2><div class="muted">Последние события приложения</div></div><button id="btnReloadLogs" class="btn ghost">Обновить логи</button></div>
           <pre id="logView" class="logview"></pre>
         </article>
       </section>
-    </main>
+</main>
   </div>
   <script src="renderer.js"></script>
 </body>
