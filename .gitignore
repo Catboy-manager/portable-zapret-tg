@@ -1,19 +1,10 @@
-# Build/output
-dist/
-dist2/
-dist3/
+# Build outputs (portable builds are kept on disk but not versioned)
+dist*/
+dist*-backup*/
+
+# Node dependencies
 node_modules/
-app/node_modules/
 
-# Runtime state
-config/
-logs/
-history/
-
-# OS/editor
-.DS_Store
-Thumbs.db
-*.log
-
-# Temp
-*.tmp
+# Python bytecode caches
+__pycache__/
+*.pyc

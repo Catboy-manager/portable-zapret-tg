@@ -2,12 +2,32 @@ const $ = (id) => document.getElementById(id);
 
 let currentStatus = null;
 let pendingSettingsTimer = null;
+let diagFilter = 'all';
+let lastBannerKind = 'info';
+let pendingClickMeta = null;
+let runActive = false;
+let unsubscribeRunProgress = null;
 
-function esc(s) { return String(s == null ? '' : s); }
+function sendClickTelemetry() {
+  if (!pendingClickMeta || !window.api || !window.api.trackUi) return;
+  const meta = pendingClickMeta;
+  pendingClickMeta = null;
+  try { window.api.trackUi({ ...meta, action: 'click', bannerKind: lastBannerKind }); } catch {}
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function safeUrl(s) {
+  return String(s == null ? '' : s).replace(/([?&](?:secret|token|password|authorization|cookie)=)[^&]*/gi, '$1[REDACTED]');
+}
 function setBanner(msg, kind = 'info') {
   const b = $('banner');
   b.textContent = msg;
-  b.className = `banner ${kind === 'error' ? 'err' : kind === 'ok' ? 'ok' : kind === 'warn' ? 'warn' : 'info'}`;
+  const bannerKind = kind === 'error' ? 'err' : kind === 'ok' ? 'ok' : kind === 'warn' ? 'warn' : 'info';
+  b.className = `banner ${bannerKind}`;
+  lastBannerKind = bannerKind;
+  sendClickTelemetry();
 }
 
 function setDot(id, state) {
@@ -27,6 +47,7 @@ function gatherSettingsPatch() {
     autoSwitchEnabled: $('chkAutoSwitch').checked,
     autoSelect: $('chkAutoSelect').checked,
     tgAutoStart: $('chkTgAuto').checked,
+    telemetryEnabled: $('chkTelemetry') ? $('chkTelemetry').checked : true,
     tgProxy: {
       host: $('tgHost').value || '127.0.0.1',
       port: Number($('tgPort').value) || 1080,
@@ -49,27 +70,160 @@ function updateModeUI(mode) {
     : 'Пользовательский режим: winws запускается как процесс. Нужны права администратора для WinDivert/драйвера.';
 }
 
-function renderCheck(check) {
-  const el = $('checkResults');
-  if (!check) {
-    el.innerHTML = '<div class="result"><div class="name">Нет данных</div><div class="meta">Нажмите «Проверить».</div></div>';
-    $('lastCheckMeta').textContent = 'Проверка ещё не выполнялась';
+function diagType(kind) {
+  const k = String(kind || 'event');
+  if (k.startsWith('check')) return 'target';
+  if (k.startsWith('profile_')) return 'profile';
+  return 'event';
+}
+
+function diagDetail(row) {
+  const parts = [];
+  if (row.status != null) parts.push(`HTTP ${row.status}`);
+  if (row.ms != null) parts.push(`${row.ms} мс`);
+  if (row.errorCode) parts.push(row.errorCode);
+  if (row.error) parts.push(row.error);
+  if (row.bytes != null) parts.push(`${row.bytes} B`);
+  if (row.url) parts.push(safeUrl(row.url));
+  if (row.reason) parts.push(`причина: ${row.reason}`);
+  if (row.decision) parts.push(row.decision);
+  if (row.from || row.to) parts.push(`${row.from || '—'} → ${row.to || '—'}`);
+  if (row.okCount != null && row.total != null) parts.push(`${row.okCount}/${row.total}`);
+  if (row.overallOk != null) parts.push(row.overallOk ? 'стабильно' : 'деградация');
+  if (row.applyMs != null) parts.push(`apply ${row.applyMs} мс`);
+  if (row.probeMs != null) parts.push(`probe ${row.probeMs} мс`);
+  if (row.postCheckCount) parts.push(`после: ${row.postCheckCount}`);
+  if (row.candidates) {
+    const names = Array.isArray(row.candidates)
+      ? row.candidates.map(c => typeof c === 'string' ? c : `${c.name || '?'} (${c.score != null ? c.score : '—'})`).join(', ')
+      : String(row.candidates);
+    parts.push(`кандидаты: ${names}`.slice(0, 180));
+  }
+  if (row.applyResult && (row.applyResult.code || row.applyResult.message)) {
+    parts.push(`apply: ${row.applyResult.code || ''} ${row.applyResult.message || ''}`.trim());
+  }
+  const known = ['ts','kind','target','profile','mode','admin','voiceActive','status','ms','errorCode','error','bytes','url','reason','decision','from','to','okCount','total','overallOk','applyMs','probeMs','postCheckCount','candidates','applyResult','ok','detail'];
+  const extra = Object.entries(row).filter(([key]) => !known.includes(key));
+  if (extra.length) parts.push(extra.slice(0, 4).map(([key, value]) => `${key}=${typeof value === 'object' ? JSON.stringify(value) : value}`).join(' '));
+  return parts.join(' · ').slice(0, 500);
+}
+
+function diagResult(row) {
+  if (row.kind === 'profile_decision') {
+    const classes = {
+      applied: 'ok', 'deferred-voice': 'warn', 'skipped-manual-lock': 'warn',
+      'skipped-cooldown': 'warn', 'skipped-disabled': 'warn', 'skipped-event': 'warn',
+      'admin-required': 'bad', 'no-candidates': 'bad', 'no-candidate-passed': 'bad', 'rolled-back': 'bad',
+    };
+    const cls = classes[row.decision] || 'warn';
+    return `<span class="badge ${cls}">${esc(row.decision || '—')}</span>`;
+  }
+  if (row.ok === true || row.overallOk === true) return '<span class="badge ok">OK</span>';
+  if (row.ok === false || row.overallOk === false) return '<span class="badge bad">FAIL</span>';
+  return `<span class="badge warn">${esc(row.kind || 'событие')}</span>`;
+}
+
+function renderDiagnostics(s) {
+  const body = $('diagRows');
+  if (!body) return;
+  let rows = Array.isArray(s.diagnostics) ? s.diagnostics.slice() : [];
+  if (!rows.length) {
+    const last = s.monitor && s.monitor.lastCheck;
+    if (last) {
+      rows = (last.results || []).map(r => ({
+        ts: last.ts, kind: 'check', target: r.name, url: r.url, ok: r.ok,
+        status: r.status, ms: r.ms, error: r.error, errorCode: r.errorCode,
+        bytes: r.bytes, reason: last.reason,
+      }));
+      rows.push({ ts: last.ts, kind: 'check_summary', ok: last.overallOk, overallOk: last.overallOk, okCount: last.okCount, total: last.total, reason: last.reason });
+    }
+  }
+  rows = rows.filter(r => diagFilter === 'all' || diagType(r.kind) === diagFilter);
+  rows.sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')));
+  rows = rows.slice(0, 300);
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="5" class="diag-empty">Нет данных для выбранного фильтра</td></tr>';
     return;
   }
-  $('lastCheckMeta').textContent = `${new Date(check.ts).toLocaleString()} · ${check.okCount}/${check.total} OK · ${check.overallOk ? 'стабильно' : 'деградация'} · ${esc(check.reason || '')}`;
-  const items = (check.results || []).map(r => `
-    <div class="result">
-      <div class="name">${esc(r.name)}</div>
-      <span class="badge ${r.ok ? 'ok' : 'bad'}">${r.ok ? 'OK' : 'FAIL'}</span>
-      <div class="meta">${r.status ? 'HTTP ' + esc(r.status) : ''} ${esc(r.error || '')}<br>${esc(r.url || '')}</div>
-    </div>`).join('');
-  const tg = check.telegram ? `
-    <div class="result">
-      <div class="name">Telegram local proxy</div>
-      <span class="badge ${(check.telegram.running || check.telegram.reachable) ? 'ok' : 'bad'}">${(check.telegram.running || check.telegram.reachable) ? 'OK' : 'FAIL'}</span>
-      <div class="meta">процесс: ${check.telegram.running ? 'да' : 'нет'} · порт: ${check.telegram.reachable ? 'слушается' : 'нет'}</div>
-    </div>` : '';
-  el.innerHTML = items + tg;
+  body.innerHTML = rows.map(r => {
+    const name = r.target || r.profile || r.to || r.from || r.kind || '—';
+    const detail = diagDetail(r);
+    return `<tr>
+      <td class="diag-time">${esc(r.ts ? new Date(r.ts).toLocaleTimeString() : '—')}</td>
+      <td>${esc(r.kind || '—')}</td>
+      <td title="${esc(name)}">${esc(name)}</td>
+      <td>${diagResult(r)}</td>
+      <td class="diag-detail" title="${esc(detail)}">${esc(detail)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderMatrixCell(cell) {
+  if (!cell) return '<span class="matrix-untested">—</span>';
+  const cls = cell.ok ? 'matrix-ok' : 'matrix-fail';
+  const label = cell.status != null ? `HTTP ${cell.status}` : (cell.errorCode || 'ошибка');
+  const detail = [
+    label,
+    cell.ms != null ? `${cell.ms} мс` : null,
+    cell.okCount != null && cell.failCount != null && cell.okCount + cell.failCount > 1
+      ? `${cell.okCount}/${cell.okCount + cell.failCount}` : null,
+    cell.error ? String(cell.error).slice(0, 120) : null,
+  ].filter(Boolean).join(' · ');
+  return `<span class="${cls}" title="${esc(detail)}">${esc(label)}</span>`;
+}
+
+function renderMatrix(s) {
+  const body = $('matrixBody');
+  const head = $('matrixHead');
+  if (!body || !head) return;
+  const matrix = s && s.profileMatrix;
+  const targets = (matrix && matrix.targets) || [];
+  const profiles = (matrix && matrix.profiles) || [];
+  head.innerHTML = '<th>Профиль</th>' + targets.map(t => `<th title="${esc(t)}">${esc(t)}</th>`).join('');
+  if (!profiles.length) {
+    body.innerHTML = `<tr><td class="diag-empty" colspan="${targets.length + 1}">Нет данных</td></tr>`;
+  } else {
+    const active = s.settings && s.settings.activeProfile;
+    body.innerHTML = profiles.map(p => {
+      const mark = p.name === active ? ' ★' : '';
+      const cells = targets.map(t => `<td>${renderMatrixCell(p.cells && p.cells[t])}</td>`).join('');
+      return `<tr><td class="matrix-profile">${esc(p.name || '—')}${mark}</td>${cells}</tr>`;
+    }).join('');
+  }
+  const tested = $('matrixTested'); if (tested) tested.textContent = matrix ? matrix.testedCount : 0;
+  const total = $('matrixTotal'); if (total) total.textContent = profiles.length;
+}
+
+function setRunProgress(data) {
+  const el = $('runProgress');
+  const runBtn = $('btnRunAll');
+  const cancelBtn = $('btnCancelRunAll');
+  if (!data) {
+    if (el) { el.classList.add('hidden'); el.textContent = ''; }
+    runActive = false;
+    if (runBtn) runBtn.disabled = false;
+    if (cancelBtn) cancelBtn.disabled = true;
+    return;
+  }
+  runActive = true;
+  if (runBtn) runBtn.disabled = true;
+  if (cancelBtn) cancelBtn.disabled = false;
+  if (!el) return;
+  const step = (data.index != null && data.total != null) ? `${data.index + 1}/${data.total}` : '';
+  const result = data.result || {};
+  const outcome = data.result ? (result.decision === 'applied' ? `OK ${result.okCount}/${result.total}` : result.decision) : 'старт';
+  el.classList.remove('hidden');
+  el.textContent = `Прогон ${data.runId || ''} · ${step} · ${data.profile || '—'} · ${outcome}`;
+}
+
+function renderCheck(check) {
+  const meta = $('lastCheckMeta');
+  if (!meta) return;
+  if (!check) {
+    meta.textContent = 'Проверка ещё не выполнялась';
+    return;
+  }
+  meta.textContent = `${new Date(check.ts).toLocaleString()} · ${check.okCount}/${check.total} OK · ${check.overallOk ? 'стабильно' : 'деградация'} · ${esc(check.reason || '')}`;
 }
 
 function renderStats(stats, profiles) {
@@ -91,6 +245,13 @@ function renderStatus(s) {
   $('adminBanner').classList.toggle('hidden', admin);
   setDot('dotAdmin', admin ? 'ok' : 'warn');
   $('sideAdmin').textContent = admin ? 'Администратор' : 'Нет прав';
+
+  const voice = s.voice || {};
+  setDot('dotVoice', voice.active ? 'warn' : 'ok');
+  $('sideVoice').textContent = voice.active
+    ? `Активен (${voice.endpointCount || 0} UDP)`
+    : 'Нет';
+  $('voiceBanner').classList.toggle('hidden', !voice.active);
 
   const sel = $('profileSelect');
   const currentSel = sel.value;
@@ -115,14 +276,16 @@ function renderStatus(s) {
   const tg = s.telegram || {};
   const tgOk = !!(tg.running || tg.reachable);
   setDot('dotTg', tgOk ? 'ok' : 'bad');
-  $('sideTg').textContent = tgOk ? `127.0.0.1:${tg.port || s.settings.tgProxy?.port || 1080}` : 'Не активен';
+  $('sideTg').textContent = tgOk ? 'Доступен' : (tg.running ? 'Запущен, нет TCP' : 'Остановлен');
 
   const mon = s.monitor || {};
   setDot('dotMon', mon.running ? 'ok' : 'warn');
-    $('sideMon').textContent = mon.running ? 'active' : 'stopped';
-  const lock = !!s.settings.manualProfileLock;
+    $('sideMon').textContent = (s.monitor && s.monitor.running) ? 'Активен' : 'Остановлен';
+  const lock = !!(s.settings && s.settings.manualProfileLock);
   const lockBtn = $('btnManualLock'); if (lockBtn) { lockBtn.textContent = lock ? 'Ручной lock: ВКЛ' : 'Ручной lock: ВЫКЛ'; lockBtn.classList.toggle('warn', lock); }
-  const lockInfo = $('manualLockInfo'); if (lockInfo) lockInfo.textContent = lock ? `Зафиксирован: ${s.settings.manualProfile || s.settings.activeProfile || '—'}` : 'Авто-переключение разрешено (если включено)';
+  const lockInfo = $('manualLockInfo'); if (lockInfo) lockInfo.textContent = lock ? `Зафиксирован: ${s.settings.manualProfile || s.settings.activeProfile || '—'}. Автопереключение по деградации пропускается.` : 'Автопереключение разрешено (если включено в настройках).';
+  renderDiagnostics(s);
+  renderMatrix(s);
 
   $('tgHost').value = s.settings.tgProxy?.host || '127.0.0.1';
   $('tgPort').value = s.settings.tgProxy?.port || 1080;
@@ -134,6 +297,7 @@ function renderStatus(s) {
   $('chkAutoSwitch').checked = !!s.settings.autoSwitchEnabled;
   $('chkAutoSelect').checked = !!s.settings.autoSelect;
   $('chkTgAuto').checked = !!s.settings.tgAutoStart;
+  const telemetryBox = $('chkTelemetry'); if (telemetryBox) telemetryBox.checked = s.telemetry?.enabled !== false;
   $('tgLinkInline').textContent = tg.link || '—';
 
   updateModeUI(s.settings.winwsMode || 'user');
@@ -175,7 +339,68 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  document.addEventListener('click', (ev) => {
+    const el = ev.target && ev.target.closest ? ev.target.closest('button, .seg') : null;
+    if (!el || !window.api || !window.api.trackUi) return;
+    pendingClickMeta = { id: el.id || el.dataset.mode || el.className, action: 'click' };
+    setTimeout(sendClickTelemetry, 2000);
+  }, true);
+
+  document.querySelectorAll('#diagFilter [data-filter]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      diagFilter = btn.dataset.filter;
+      document.querySelectorAll('#diagFilter [data-filter]').forEach(b => b.classList.toggle('active', b === btn));
+      if (currentStatus) renderDiagnostics(currentStatus);
+    });
+  });
+  const btnDiagRows = $('btnDiagRefresh');
+  if (btnDiagRows) btnDiagRows.onclick = () => withBusy(btnDiagRows, 'Обновление…', async () => {
+    const d = await window.api.getDiagnostics(300);
+    if (currentStatus) {
+      currentStatus.diagnostics = d.diagnostics || [];
+      renderDiagnostics(currentStatus);
+    }
+    setBanner('Таблица диагностики обновлена', 'ok');
+  });
+
+  const btnRunAll = $('btnRunAll');
+  if (btnRunAll) btnRunAll.onclick = () => withBusy(btnRunAll, 'Проверка…', async () => {
+    if (runActive) { setBanner('Прогон уже идёт', 'warn'); return; }
+    setRunProgress({ index: 0, total: 0, profile: 'запуск' });
+    try {
+      const r = await window.api.runAllProfiles();
+      if (!r || r.ok === false) {
+        setBanner(r && r.reason === 'voice-active' ? 'Прогон отложен: активен голос Discord' : `Прогон не запущен: ${(r && r.reason) || 'неизвестно'}`, 'warn');
+      } else if (r.aborted) {
+        setBanner(`Прогон прерван: ${r.reason}`, 'warn');
+      } else {
+        setBanner(r.winner ? `Лучший профиль применён: ${r.winner}` : 'Прогон завершён, победитель не найден', r.winner ? 'ok' : 'warn');
+      }
+      await refresh(); await refreshLogs();
+    } finally { setRunProgress(null); }
+  });
+  const btnCancelRunAll = $('btnCancelRunAll');
+  if (btnCancelRunAll) btnCancelRunAll.onclick = () => withBusy(btnCancelRunAll, 'Отмена…', async () => {
+    const r = await window.api.cancelRunAllProfiles();
+    setBanner(r && r.ok ? 'Отмена отправлена' : 'Активного прогона нет', r && r.ok ? 'warn' : 'info');
+  });
+  const btnMatrixRefresh = $('btnMatrixRefresh');
+  if (btnMatrixRefresh) btnMatrixRefresh.onclick = () => withBusy(btnMatrixRefresh, 'Обновление…', async () => {
+    const m = await window.api.getProfileMatrix(300);
+    if (currentStatus && m) { currentStatus.profileMatrix = m; renderMatrix(currentStatus); }
+    setBanner('Матрица профилей обновлена', 'ok');
+  });
+  if (window.api.onRunProgress) unsubscribeRunProgress = window.api.onRunProgress((data) => {
+    setRunProgress(data);
+    if (data && data.result && currentStatus) refresh();
+  });
+  window.addEventListener('beforeunload', () => {
+    if (unsubscribeRunProgress) { try { unsubscribeRunProgress(); } catch {} }
+    unsubscribeRunProgress = null;
+  });
+
   $('btnRefresh').onclick = () => withBusy($('btnRefresh'), 'Обновление…', async () => { await refresh(); await refreshLogs(); setBanner('Статус обновлён', 'ok'); });
+  const btnDiag = $('btnExportDiag'); if (btnDiag) btnDiag.onclick = () => withBusy(btnDiag, 'Экспорт...', async () => { const r = await window.api.exportDiagnostics(); if (r && r.ok) setBanner('Диагностика сохранена: ' + r.path, 'ok'); else if (r && !r.canceled) setBanner('Не удалось экспортировать диагностику', 'error'); });
   $('btnProbe').onclick = () => withBusy($('btnProbe'), 'Проверка…', async () => {
     const r = await window.api.probeNow(); if (r.check) renderCheck(r.check); if (r.status) renderStatus(r.status); await refreshLogs();
     setBanner(r.check?.overallOk ? 'Проверка: цели доступны' : 'Проверка: есть деградация/недоступность', r.check?.overallOk ? 'ok' : 'warn');
@@ -221,13 +446,19 @@ window.addEventListener('DOMContentLoaded', () => {
   $('btnSaveMon').onclick = () => withBusy($('btnSaveMon'), 'Сохранение…', async () => { await saveAndRefresh(); setBanner('Настройки мониторинга сохранены', 'ok'); });
   $('btnReloadLogs').onclick = () => refreshLogs();
 
-  ['monInterval','monTimeout','monFail','monCooldown','chkAutoSwitch','chkAutoSelect','chkTgAuto','tgHost','tgPort','tgSecret'].forEach(id => {
+  ['monInterval','monTimeout','monFail','monCooldown','chkAutoSwitch','chkAutoSelect','chkTgAuto','chkTelemetry','tgHost','tgPort','tgSecret'].forEach(id => {
     const el = $(id); if (!el) return;
     el.addEventListener('change', scheduleSettingsSave);
   });
 
   window.api.on('check', (check) => { renderCheck(check); refresh(); });
-  window.api.on('status', (data) => { if (data && data.message) setBanner(data.message, 'info'); refresh(); });
+  window.api.on('status', (data) => {
+    if (data && data.message) {
+      const deferred = /discord|голос/i.test(data.message);
+      setBanner(data.message, deferred ? 'warn' : 'info');
+    }
+    refresh();
+  });
 
   refresh(); refreshLogs();
   setInterval(refresh, 12000);

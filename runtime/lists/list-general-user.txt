@@ -5,3 +5,6 @@ www.rutracker.org
 rutracker.cc
 rutracker.me
 static.rutracker.cc
+# Explicit Discord image hosts (also covered by discordapp.* wildcards)
+media.discordapp.net
+cdn.discordapp.com

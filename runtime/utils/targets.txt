@@ -9,14 +9,15 @@
 
 ### Discord
 DiscordMain           = "https://discord.com"
-DiscordGateway        = "https://gateway.discord.gg"
-DiscordCDN            = "https://cdn.discordapp.com"
+DiscordGateway        = "https://discord.com/api/gateway"
+DiscordCDN            = "https://cdn.discordapp.com/embed/avatars/0.png"
+DiscordMedia          = "https://media.discordapp.net/embed/avatars/0.png"
 DiscordUpdates        = "https://updates.discord.com"
 
 ### YouTube
-YouTubeWeb            = "https://www.youtube.com"
+YouTubeWeb            = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
 YouTubeShort          = "https://youtu.be"
-YouTubeImage          = "https://i.ytimg.com"
+YouTubeImage          = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg"
 YouTubeVideoRedirect  = "https://redirector.googlevideo.com"
 
 ### Google
@@ -26,6 +27,11 @@ GoogleGstatic         = "https://www.gstatic.com"
 ### Cloudflare
 CloudflareWeb         = "https://www.cloudflare.com"
 CloudflareCDN         = "https://cdnjs.cloudflare.com"
+
+
+### RuTracker
+RuTrackerMain         = "https://rutracker.org/forum/index.php"
+RuTrackerStatic       = "https://static.rutracker.cc"
 
 ### Public DNS (PING-only)
 CloudflareDNS1111     = "PING:1.1.1.1"
