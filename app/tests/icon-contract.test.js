@@ -22,7 +22,7 @@ test('packaged resources include icon.ico', () => {
   const extraFiles = pkg.build && pkg.build.extraFiles;
   assert.ok(Array.isArray(extraFiles), 'build.extraFiles missing');
   assert.ok(
-    extraFiles.some(entry => entry.from === 'build/icon.ico' && entry.to === 'icon.ico'),
-    'missing build/icon.ico -> icon.ico mapping',
+    extraFiles.some(entry => entry.from === 'build/icon.ico' && entry.to === 'resources/icon.ico'),
+    'missing build/icon.ico -> resources/icon.ico mapping',
   );
 });

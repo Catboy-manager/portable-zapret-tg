@@ -43,7 +43,7 @@
       },
       {
         "from": "build/icon.ico",
-        "to": "icon.ico"
+        "to": "resources/icon.ico"
       }
     ],
     "forceCodeSigning": false
