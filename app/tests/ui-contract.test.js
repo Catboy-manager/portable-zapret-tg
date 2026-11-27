@@ -65,6 +65,16 @@ test('matrix styles distinguish ok, fail and untested cells', () => {
   assert.match(css, /\.run-progress/);
 });
 
+test('hover help explains matrix-driven passive ranking', () => {
+  for (const text of [
+    'из таблицы «Профили и результаты тестов»',
+    'критические цели',
+    'свежесть',
+  ]) {
+    assert.ok(html.includes(text), `missing help text: ${text}`);
+  }
+});
+
 test('hover help explains workflow, buttons and run caveats', () => {
   for (const id of ['btnHelp', 'helpPanel']) {
     assert.ok(html.includes(`id="${id}"`), `missing #${id}`);

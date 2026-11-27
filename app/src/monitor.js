@@ -4,6 +4,9 @@ const { exec } = require('./winws');
 const { readTargets, parseProfile, listProfiles } = require('./profiles');
 const { tcpReachable } = require('./tgproxy');
 const { CRITICAL_TARGETS, DEFAULT_HEALTH_TARGETS, normalizeHealthTargets, isCriticalTarget } = require('./targets');
+const { buildProfileMatrix } = require('./profile-matrix');
+
+const MATRIX_ROWS = 300;
 
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
@@ -204,19 +207,45 @@ class Monitor {
     return rate + recencyBonus;
   }
 
+  readMatrixRows() {
+    if (this.storage && typeof this.storage.readRecentDiagnostics === 'function') {
+      return this.storage.readRecentDiagnostics(MATRIX_ROWS);
+    }
+    return [];
+  }
+
+  scoreMatrixProfile(row, legacyScore = 0, now = Date.now()) {
+    // Profiles without matrix data stay reachable but always rank below tested ones.
+    if (!row || !row.tested) return Math.max(0, Number(legacyScore) || 0);
+    const currentOk = Object.values(row.cells).filter(c => c && c.ok).length;
+    const parsedTs = row.lastTs ? Date.parse(row.lastTs) : NaN;
+    const ageDays = Number.isFinite(parsedTs)
+      ? Math.max(0, (now - parsedTs) / (24 * 3600 * 1000))
+      : 7;
+    const freshness = Math.max(0, 1 - ageDays / 7);
+    return 1e6 + row.criticalOk * 1e4 + currentOk * 10 + freshness;
+  }
+
   rankCandidates(settings) {
     const all = listProfiles(this.runtimeDir);
+    const matrix = buildProfileMatrix({
+      rows: this.readMatrixRows(),
+      profiles: all,
+      targets: normalizeHealthTargets(settings.healthTargets),
+    });
     const stats = this.storage.loadStats();
-    const preferred = [];
-    if (settings.lastGoodProfile && all.includes(settings.lastGoodProfile)) preferred.push({ name: settings.lastGoodProfile, score: 1 });
-    const active = settings.activeProfile;
-    if (active && !preferred.some(x => x.name === active) && all.includes(active)) preferred.push({ name: active, score: 1 });
-    const ranked = all
-      .filter(p => !preferred.some(x => x.name === p))
-      .map(p => ({ name: p, score: this.scoreProfile(p, stats) }))
-      .sort((a,b) => b.score - a.score);
-    const count = Math.max(1, Number(settings.candidateCount)||3);
-    return [...preferred, ...ranked].slice(0, count);
+    const byName = new Map(matrix.profiles.map(p => [p.name, p]));
+    const ranked = all.map(name => ({
+      name,
+      score: this.scoreMatrixProfile(byName.get(name), this.scoreProfile(name, stats)),
+    })).sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (a.name === settings.lastGoodProfile) return -1;
+      if (b.name === settings.lastGoodProfile) return 1;
+      return a.name.localeCompare(b.name);
+    });
+    const count = Math.max(1, Number(settings.candidateCount) || 3);
+    return ranked.slice(0, count);
   }
 
   getCandidates(settings) {
