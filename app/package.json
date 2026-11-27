@@ -18,7 +18,7 @@
     "appId": "local.zapret.tg.controller",
     "productName": "ZapretTG",
     "directories": {
-      "output": "../dist3"
+      "output": "../dist8"
     },
     "files": [
       "**/*"
@@ -40,6 +40,10 @@
       {
         "from": "../runtime",
         "to": "runtime"
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
       }
     ],
     "forceCodeSigning": false
