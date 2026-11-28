@@ -85,6 +85,12 @@ test('buildApplyScript waits for exit, retries locked files and relaunches', () 
   assert.match(script, /Remove-Item/);
 });
 
+test('buildApplyScript expands every staged item instead of a literal wildcard', () => {
+  const script = buildApplyScript({ appRoot: 'C:\\Apps\\Zapret', stagingDir: 'C:\\Apps\\Zapret\\.updates\\staging', parentPid: 1 });
+  assert.match(script, /Get-ChildItem -LiteralPath \$staging -Force \| Copy-Item -Destination \$appRoot -Recurse -Force/);
+  assert.doesNotMatch(script, /Copy-Item -LiteralPath \(Join-Path \$staging '\*'\)/);
+});
+
 test('buildApplyScript contains no token, password or secret', () => {
   const script = buildApplyScript({ appRoot: 'C:\\Apps\\Zapret', stagingDir: 'C:\\Apps\\Zapret\\.updates\\staging', parentPid: 1 });
   assert.doesNotMatch(script, /token|password|secret|authorization/i);

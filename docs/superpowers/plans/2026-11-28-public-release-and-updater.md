@@ -74,3 +74,11 @@
 - [x] **Step 5: Commit, annotated tag v1.2.0, push branch and tags**
 - [x] **Step 6: Upload release asset**
 - [x] **Step 7: Verify latest-release API response is consumable by the updater**
+
+### Task 5: v1.2.1 hotfix (apply-step wildcard)
+
+- [x] **Step 1: Reproduce the bug** — `Copy-Item -LiteralPath "<dir>\*"` silently copies nothing in Windows PowerShell 5.1, so the detached helper reported success without applying files
+- [x] **Step 2: Add a failing contract test to `app/tests/updater.test.js`**
+- [x] **Step 3: Replace the literal wildcard copy with `Get-ChildItem -LiteralPath $staging -Force | Copy-Item ...`** (also preserves extra local files such as `resources/monitor.js`)
+- [x] **Step 4: Re-run full suite (127/127) and verify the generated script in `app.asar`**
+- [x] **Step 5: Bump version to 1.2.1, rebuild, publish `ZapretTG-1.2.1-win-x64.zip` with its SHA-256, and remove the broken v1.2.0 release**

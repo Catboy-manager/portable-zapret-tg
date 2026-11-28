@@ -1,6 +1,7 @@
 # Build outputs (portable builds are kept on disk but not versioned)
 dist*/
 dist*-backup*/
+dist*.zip
 
 # Node dependencies
 node_modules/

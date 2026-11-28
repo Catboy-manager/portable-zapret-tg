@@ -122,7 +122,7 @@ foreach ($name in $preserve) {
 $applied = $false
 for ($attempt = 0; $attempt -lt 20; $attempt++) {
   try {
-    Copy-Item -LiteralPath (Join-Path $staging '*') -Destination $appRoot -Recurse -Force -ErrorAction Stop
+    Get-ChildItem -LiteralPath $staging -Force | Copy-Item -Destination $appRoot -Recurse -Force -ErrorAction Stop
     $applied = $true
     break
   } catch {
