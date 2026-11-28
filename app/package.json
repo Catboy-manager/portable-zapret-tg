@@ -1,6 +1,6 @@
 {
   "name": "portable-zapret-tg",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Portable controller for zapret (winws) and TgWsProxy with quiet auto-switching",
   "main": "main.js",
   "author": "local",
