@@ -42,7 +42,7 @@ class Storage {
       candidateCount: 3,
       winwsMode: 'user', // 'user' | 'service'
       tgAutoStart: true,
-      tgProxy: { host: '127.0.0.1', port: 1080, secret: 'TEST_SECRET_VALUE' },
+      tgProxy: { host: '127.0.0.1', port: 1080, secret: '' },
       lastGoodProfile: 'general (SIMPLE FAKE).bat',
       activeProfile: null,
       manualProfileLock: false,

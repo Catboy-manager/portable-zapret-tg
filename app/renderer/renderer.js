@@ -7,6 +7,7 @@ let lastBannerKind = 'info';
 let pendingClickMeta = null;
 let runActive = false;
 let unsubscribeRunProgress = null;
+let unsubscribeUpdateProgress = null;
 
 function sendClickTelemetry() {
   if (!pendingClickMeta || !window.api || !window.api.trackUi) return;
@@ -317,9 +318,39 @@ function renderStatus(s) {
   renderStats(s.stats, s.profiles);
 }
 
+function renderUpdateState(state) {
+  const label = $('updateState');
+  const progress = $('updateProgress');
+  if (!label || !state) return;
+  const version = state.currentVersion || '—';
+  let text = `Версия: ${version}`;
+  if (state.latestVersion) text += ` · доступна ${state.latestVersion}`;
+  if (state.error) text += ` · ошибка: ${String(state.error).slice(0, 120)}`;
+  label.textContent = text;
+  if (progress) {
+    const messages = {
+      idle: 'Проверка обновлений не выполнялась',
+      checking: 'Проверка GitHub Releases…',
+      available: 'Доступна новая версия — скачайте обновление',
+      current: 'Установлена актуальная версия',
+      downloading: 'Загрузка архива…',
+      extracting: 'Проверка и распаковка архива…',
+      ready: 'Обновление готово к установке',
+      applying: 'Установка и перезапуск…',
+      error: 'Ошибка обновления — подробности в логе',
+    };
+    progress.textContent = state.message || messages[state.phase] || '...';
+  }
+  const applyBtn = $('btnApplyUpdate');
+  if (applyBtn) applyBtn.disabled = !state.staged;
+}
+
 async function refresh() {
-  try { renderStatus(await window.api.getStatus()); }
-  catch (e) { setBanner('Ошибка статуса: ' + e.message, 'error'); }
+  try {
+    const s = await window.api.getStatus();
+    renderStatus(s);
+    renderUpdateState(s.update);
+  } catch (e) { setBanner('Ошибка статуса: ' + e.message, 'error'); }
 }
 async function refreshLogs() {
   try {
@@ -409,7 +440,28 @@ window.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('beforeunload', () => {
     if (unsubscribeRunProgress) { try { unsubscribeRunProgress(); } catch {} }
     unsubscribeRunProgress = null;
+    if (unsubscribeUpdateProgress) { try { unsubscribeUpdateProgress(); } catch {} }
+    unsubscribeUpdateProgress = null;
   });
+
+  const btnCheckUpdate = $('btnCheckUpdate');
+  if (btnCheckUpdate) btnCheckUpdate.onclick = () => withBusy(btnCheckUpdate, 'Проверка…', async () => {
+    const r = await window.api.checkForUpdates();
+    renderUpdateState(await window.api.getUpdateState());
+    setBanner(r && r.available ? `Доступна версия ${r.latestVersion}` : 'Актуальная версия уже установлена', r && r.available ? 'warn' : 'ok');
+  });
+  const btnDownloadUpdate = $('btnDownloadUpdate');
+  if (btnDownloadUpdate) btnDownloadUpdate.onclick = () => withBusy(btnDownloadUpdate, 'Загрузка…', async () => {
+    const r = await window.api.downloadUpdate();
+    renderUpdateState(await window.api.getUpdateState());
+    setBanner(r && r.ok ? 'Обновление скачано и проверено' : 'Не удалось скачать обновление', r && r.ok ? 'ok' : 'error');
+  });
+  const btnApplyUpdate = $('btnApplyUpdate');
+  if (btnApplyUpdate) btnApplyUpdate.onclick = () => withBusy(btnApplyUpdate, 'Установка…', async () => {
+    const r = await window.api.applyUpdate();
+    setBanner(r && r.ok ? 'Установка обновления… приложение перезапустится' : 'Обновление не готово к установке', r && r.ok ? 'ok' : 'warn');
+  });
+  if (window.api.onUpdateProgress) unsubscribeUpdateProgress = window.api.onUpdateProgress((data) => renderUpdateState(data));
 
   $('btnRefresh').onclick = () => withBusy($('btnRefresh'), 'Обновление…', async () => { await refresh(); await refreshLogs(); setBanner('Статус обновлён', 'ok'); });
   const btnDiag = $('btnExportDiag'); if (btnDiag) btnDiag.onclick = () => withBusy(btnDiag, 'Экспорт...', async () => { const r = await window.api.exportDiagnostics(); if (r && r.ok) setBanner('Диагностика сохранена: ' + r.path, 'ok'); else if (r && !r.canceled) setBanner('Не удалось экспортировать диагностику', 'error'); });

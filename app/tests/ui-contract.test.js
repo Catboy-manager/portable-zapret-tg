@@ -111,3 +111,31 @@ test('hover help explains the critical-block warning and retry', () => {
   assert.ok(html.includes('провайдер заблокировал все методы обхода'), 'missing block warning text');
   assert.ok(html.includes('Повторяю полный подбор'), 'missing retry text');
 });
+
+test('update controls and progress line exist', () => {
+  for (const id of ['btnCheckUpdate', 'btnDownloadUpdate', 'btnApplyUpdate', 'updateState', 'updateProgress']) {
+    assert.ok(html.includes(`id="${id}"`), `missing #${id}`);
+  }
+  assert.match(html, /Проверить обновления/);
+  assert.match(css, /\.update-bar/);
+});
+
+test('renderer wires the update flow and progress events', () => {
+  for (const name of ['checkForUpdates', 'downloadUpdate', 'applyUpdate', 'onUpdateProgress']) {
+    assert.match(js, new RegExp(`window\\.api\\.${name}\\(`));
+  }
+  assert.match(js, /function renderUpdateState/);
+  assert.match(js, /версия|обновлен/);
+});
+
+test('hover help explains the updater safety guarantees', () => {
+  for (const text of [
+    'SHA-256',
+    'config/',
+    'history/',
+    'logs/',
+    'перезапустится',
+  ]) {
+    assert.ok(html.includes(text), `missing help text: ${text}`);
+  }
+});

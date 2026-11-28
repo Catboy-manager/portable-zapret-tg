@@ -12,6 +12,7 @@ const { Monitor } = require('./src/monitor');
 const { VoiceDetector } = require('./src/voice');
 const { redact, systemInfo } = require('./src/telemetry');
 const { buildProfileMatrix, runFullSelection, createRunToken } = require('./src/profile-matrix');
+const { compareVersions, parseLatestRelease, verifySha256, planUpdate, buildApplyScript } = require('./src/updater');
 
 Menu.setApplicationMenu(null);
 app.setName('ZapretTG');
@@ -26,6 +27,9 @@ const BASE_DIR = app.isPackaged
   ? path.dirname(process.execPath)
   : path.resolve(__dirname, '..'); // portable-zapret-tg root (or folder next to exe when packaged)
 const RUNTIME_DIR = path.join(BASE_DIR, 'runtime');
+const RELEASES_URL = 'https://api.github.com/repos/Catboy-manager/portable-zapret-tg/releases/latest';
+const UPDATES_DIR = path.join(BASE_DIR, '.updates');
+const MAX_UPDATE_BYTES = 300 * 1024 * 1024;
 
 let mainWindow = null;
 const storage = new Storage(BASE_DIR);
@@ -35,6 +39,11 @@ const voice = new VoiceDetector({});
 let monitor = null;
 let runToken = null;
 let settingsRestartPending = false;
+let updateState = {
+  phase: 'idle', currentVersion: app.getVersion(), latestVersion: null,
+  available: false, checkedAt: null, error: null, staged: false,
+};
+let updateInfo = null;
 
 function isAdminSync() {
   try {
@@ -120,6 +129,7 @@ async function getStatus() {
       targets: settings.healthTargets,
     }),
     telemetry: { enabled: settings.telemetryEnabled !== false, file: storage.telemetryFile },
+    update: { ...updateState },
   };
 }
 
@@ -217,6 +227,136 @@ function createWindow() {
   mainWindow.on('focus', () => recordWindow('focus'));
   mainWindow.on('close', () => recordWindow('close'));
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+}
+
+function setUpdateState(patch, message) {
+  updateState = { ...updateState, ...patch };
+  emit('update-progress', { ...updateState, message: message || '' });
+}
+
+function runCommand(file, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (chunk) => { out += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { err += chunk.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve(out);
+      else reject(new Error(`${path.basename(file)} failed (${code}): ${err.trim().slice(0, 400)}`));
+    });
+  });
+}
+
+async function checkForUpdates() {
+  setUpdateState({ phase: 'checking', error: null });
+  try {
+    const res = await fetch(RELEASES_URL, {
+      headers: { 'User-Agent': 'ZapretTG-Updater', Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new Error(`GitHub API HTTP ${res.status}`);
+    const info = parseLatestRelease(await res.json());
+    const available = compareVersions(info.version, app.getVersion()) > 0;
+    updateInfo = info;
+    updateState = {
+      ...updateState,
+      phase: available ? 'available' : 'current',
+      latestVersion: info.version,
+      available,
+      checkedAt: new Date().toISOString(),
+      error: null,
+      staged: false,
+    };
+    emit('update-progress', {
+      ...updateState,
+      message: available ? `Доступна версия ${info.version}` : 'Актуальная версия уже установлена',
+    });
+    return {
+      ok: true,
+      currentVersion: app.getVersion(),
+      latestVersion: info.version,
+      available,
+      notes: info.notes,
+      sha256: info.sha256,
+      assetName: info.assetName,
+    };
+  } catch (e) {
+    const message = e && e.message ? e.message : String(e);
+    updateState = { ...updateState, phase: 'error', error: message };
+    emit('update-progress', { ...updateState, message });
+    throw e;
+  }
+}
+
+async function downloadUpdate(force = false) {
+  if (!updateInfo || force) await checkForUpdates();
+  if (!updateInfo) throw new Error('no release information');
+  if (!updateState.available) return { ok: true, alreadyCurrent: true, version: updateInfo.version };
+
+  setUpdateState({ phase: 'downloading', error: null, staged: false }, 'Загрузка обновления…');
+  const res = await fetch(updateInfo.assetUrl, {
+    headers: { 'User-Agent': 'ZapretTG-Updater' },
+    signal: AbortSignal.timeout(120000),
+  });
+  if (!res.ok) throw new Error(`download HTTP ${res.status}`);
+  const declared = Number(res.headers.get('content-length') || 0);
+  if (declared > MAX_UPDATE_BYTES) throw new Error('update archive is too large');
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of res.body) {
+    total += chunk.length;
+    if (total > MAX_UPDATE_BYTES) throw new Error('update archive is too large');
+    chunks.push(chunk);
+  }
+  const archive = Buffer.concat(chunks);
+  if (!verifySha256(archive, updateInfo.sha256)) throw new Error('SHA-256 mismatch: update was not applied');
+
+  fs.mkdirSync(UPDATES_DIR, { recursive: true });
+  const zipPath = path.join(UPDATES_DIR, updateInfo.assetName);
+  fs.writeFileSync(zipPath, archive);
+  const stagingDir = path.join(UPDATES_DIR, 'staging');
+  fs.rmSync(stagingDir, { recursive: true, force: true });
+  fs.mkdirSync(stagingDir, { recursive: true });
+
+  setUpdateState({ phase: 'extracting' }, 'Проверка архива…');
+  const listing = execFileSync('tar.exe', ['-tf', zipPath], {
+    encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true,
+  });
+  const entries = listing.split(/\r?\n/).map((s) => s.trim()).filter(Boolean).map((s) => s.replace(/^\.\//, ''));
+  const plan = planUpdate(entries);
+  await runCommand('tar.exe', ['-xf', zipPath, '-C', stagingDir]);
+  for (const entry of plan.preserve) {
+    const target = path.resolve(stagingDir, entry);
+    if (target.startsWith(stagingDir + path.sep)) fs.rmSync(target, { recursive: true, force: true });
+  }
+  if (!fs.existsSync(path.join(stagingDir, 'ZapretTG.exe'))) {
+    throw new Error('archive has no ZapretTG.exe at its root');
+  }
+  updateState = { ...updateState, phase: 'ready', staged: true, error: null };
+  emit('update-progress', { ...updateState, message: `Версия ${updateInfo.version} готова к установке` });
+  return { ok: true, version: updateInfo.version, staged: true };
+}
+
+async function applyUpdate() {
+  if (!updateState.staged || !updateInfo) return { ok: false, reason: 'nothing-staged' };
+  const stagingDir = path.join(UPDATES_DIR, 'staging');
+  const scriptPath = path.join(UPDATES_DIR, 'apply.ps1');
+  fs.writeFileSync(scriptPath, buildApplyScript({
+    appRoot: BASE_DIR,
+    stagingDir,
+    exeName: 'ZapretTG.exe',
+    parentPid: process.pid,
+  }), 'utf8');
+  storage.log('info', 'Applying portable update', { version: updateInfo.version });
+  spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], {
+    windowsHide: true, detached: true, stdio: 'ignore',
+  }).unref();
+  updateState = { ...updateState, phase: 'applying' };
+  emit('update-progress', { ...updateState, message: 'Приложение перезапустится…' });
+  setTimeout(() => app.quit(), 500).unref();
+  return { ok: true, restarting: true, version: updateInfo.version };
 }
 
 app.whenReady().then(async () => {
@@ -413,6 +553,10 @@ registerHandler('cancelRunAllProfiles', async () => {
   runToken.cancel();
   return { ok: true };
 });
+registerHandler('getUpdateState', async () => ({ ok: true, ...updateState }));
+registerHandler('checkForUpdates', async () => await checkForUpdates());
+registerHandler('downloadUpdate', async () => await downloadUpdate());
+registerHandler('applyUpdate', async () => await applyUpdate());
 
 } // end !elevating
 

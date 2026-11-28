@@ -22,10 +22,19 @@ contextBridge.exposeInMainWorld('api', {
   getProfileMatrix: (n) => ipcRenderer.invoke('getProfileMatrix', n),
   runAllProfiles: () => ipcRenderer.invoke('runAllProfiles'),
   cancelRunAllProfiles: () => ipcRenderer.invoke('cancelRunAllProfiles'),
+  getUpdateState: () => ipcRenderer.invoke('getUpdateState'),
+  checkForUpdates: () => ipcRenderer.invoke('checkForUpdates'),
+  downloadUpdate: () => ipcRenderer.invoke('downloadUpdate'),
+  applyUpdate: () => ipcRenderer.invoke('applyUpdate'),
   onRunProgress: (cb) => {
     const handler = (_e, data) => cb(data);
     ipcRenderer.on('run-progress', handler);
     return () => ipcRenderer.removeListener('run-progress', handler);
+  },
+  onUpdateProgress: (cb) => {
+    const handler = (_e, data) => cb(data);
+    ipcRenderer.on('update-progress', handler);
+    return () => ipcRenderer.removeListener('update-progress', handler);
   },
   on: (channel, cb) => {
     const handler = (_e, data) => cb(data);

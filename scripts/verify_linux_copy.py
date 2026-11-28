@@ -8,9 +8,9 @@ import sys
 
 import paramiko
 
-DEFAULT_HOST = "192.0.2.10"
-DEFAULT_USER = "cat"
-DEFAULT_REMOTE = "/home/linuxuser/Documents/portable-zapret-tg"
+DEFAULT_HOST = os.environ.get("ZAPRET_LINUX_HOST", "")
+DEFAULT_USER = os.environ.get("ZAPRET_LINUX_USER", "")
+DEFAULT_REMOTE = os.environ.get("ZAPRET_LINUX_REMOTE", "~/Documents/portable-zapret-tg")
 
 
 def main():
@@ -24,6 +24,8 @@ def main():
     parser.add_argument("--yes", action="store_true", help="Skip cleanup confirmation")
     args = parser.parse_args()
 
+    if not args.host or not args.user:
+        raise SystemExit("Set ZAPRET_LINUX_HOST and ZAPRET_LINUX_USER (or pass --host/--user)")
     password = os.environ.get("ZAPRET_LINUX_PASSWORD")
     if not password:
         raise SystemExit("Password not provided: set ZAPRET_LINUX_PASSWORD")
