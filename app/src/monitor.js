@@ -5,6 +5,7 @@ const { readTargets, parseProfile, listProfiles } = require('./profiles');
 const { tcpReachable } = require('./tgproxy');
 const { CRITICAL_TARGETS, DEFAULT_HEALTH_TARGETS, normalizeHealthTargets, isCriticalTarget } = require('./targets');
 const { buildProfileMatrix } = require('./profile-matrix');
+const { looksInvalidApplyResult, isInvalidProfile, recentlyFailed, recordFailedProfile, markInvalidProfile } = require('./profile-health');
 
 const MATRIX_ROWS = 300;
 
@@ -130,8 +131,8 @@ class Monitor {
     return !!this.paused;
   }
 
-  async probeOnce(reason = 'manual', runId = null, profileName = null) {
-    const settings = this.storage.loadSettings();
+  async probeOnce(reason = 'manual', runId = null, profileName = null, settingsOverride = null) {
+    const settings = settingsOverride || this.storage.loadSettings();
     const targets = pickMonitorTargets(this.runtimeDir, settings);
     const timeoutMs = Number(settings.probeTimeoutMs) || 6000;
     const runMeta = runId ? { runId } : {};
@@ -142,6 +143,7 @@ class Monitor {
       this.recordDiagnostic('check', { target: t.name, url: t.url, reason, critical: isCriticalTarget(t.name), ...runMeta, ...r }, profileName);
     }
     const okCount = results.filter(r => r.ok).length;
+    const failedTargets = results.filter(r => !r.ok).map(r => r.name);
     const total = results.length || 1;
     const criticalResults = results.filter(r => r.critical);
     const criticalOk = criticalResults.filter(r => r.ok).length;
@@ -162,6 +164,7 @@ class Monitor {
       okCount, total,
       criticalOk, criticalTotal, criticalMissing,
       nonCriticalOk, nonCriticalTotal,
+      failedTargets,
       results,
       telegram: { running: tgStatus.running, reachable: tgStatus.reachable },
     };
@@ -177,9 +180,13 @@ class Monitor {
       criticalMissing,
       nonCriticalOk,
       nonCriticalTotal,
+      failedTargets,
       telegramRunning: !!tgStatus.running,
       telegramReachable: !!tgStatus.reachable,
     }, profileName);
+    if (failedTargets.length) {
+      this.storage.log('warn', 'Quick check failed targets', { reason, ...runMeta, ok: `${okCount}/${total}`, failedTargets });
+    }
     // update stats
     const stats = this.storage.loadStats();
     stats.targets = stats.targets || {};
@@ -234,11 +241,17 @@ class Monitor {
       targets: normalizeHealthTargets(settings.healthTargets),
     });
     const stats = this.storage.loadStats();
+    const profileStats = stats.profiles || {};
     const byName = new Map(matrix.profiles.map(p => [p.name, p]));
-    const ranked = all.map(name => ({
-      name,
-      score: this.scoreMatrixProfile(byName.get(name), this.scoreProfile(name, stats)),
-    })).sort((a, b) => {
+    const eligible = all.filter(name => !isInvalidProfile(profileStats[name]));
+    const ranked = eligible.map(name => {
+      const failedRecently = recentlyFailed(profileStats[name]);
+      let score = this.scoreMatrixProfile(byName.get(name), this.scoreProfile(name, stats));
+      // Recently failed profiles stay available for manual use but go behind
+      // untested exploration in passive mode so the same three never cycle.
+      if (failedRecently) score = -1;
+      return { name, score, tested: !!(byName.get(name) && byName.get(name).tested), failedRecently };
+    }).sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       if (a.name === settings.lastGoodProfile) return -1;
       if (b.name === settings.lastGoodProfile) return 1;
@@ -273,6 +286,15 @@ class Monitor {
       this.storage.saveSettings(settings);
       this.storage.log('info', 'Applied profile', { profile: profileName, mode: settings.winwsMode });
     } else {
+      if (looksInvalidApplyResult(res)) {
+        const stats = this.storage.loadStats();
+        markInvalidProfile(stats, profileName, res);
+        this.storage.saveStats(stats);
+        this.recordDiagnostic('profile_decision', {
+          decision: 'invalid-profile', from: settings.activeProfile, to: profileName,
+          reason: res && res.message, invalidReason: stats.profiles[profileName].invalidReason,
+        });
+      }
       this.storage.log('warn', 'Failed to apply profile', { profile: profileName, mode: settings.winwsMode, res });
     }
     return res;
@@ -366,10 +388,11 @@ class Monitor {
         this.recordDiagnostic('profile_decision', { decision: 'applied', reason, from: prev, to: cand, candidates: ranked });
         return { ok: true, profile: cand };
       } else {
-        ps.fail++; ps.lastFailTs = check.ts; stats.profiles[cand] = ps; this.storage.saveStats(stats);
-        this.storage.appendEvent({ type: 'switch_attempt', from: prev, to: cand, ok: false, check: { ok: check.overallOk } });
-        this.storage.log('warn', 'Candidate did not pass quick check', { cand });
-        this.recordDiagnostic('profile_attempt', { from: prev, to: cand, ok: false, reason, applyMs, probeMs, postCheckOk: false, postCheckCount: `${check.okCount}/${check.total}` });
+        recordFailedProfile(stats, cand, check);
+        this.storage.saveStats(stats);
+        this.storage.appendEvent({ type: 'switch_attempt', from: prev, to: cand, ok: false, check: { ok: check.overallOk, failedTargets: check.failedTargets } });
+        this.storage.log('warn', 'Candidate did not pass quick check', { cand, ok: `${check.okCount}/${check.total}`, failedTargets: check.failedTargets });
+        this.recordDiagnostic('profile_attempt', { from: prev, to: cand, ok: false, reason, applyMs, probeMs, postCheckOk: false, postCheckCount: `${check.okCount}/${check.total}`, failedTargets: check.failedTargets });
       }
     }
 

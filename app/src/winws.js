@@ -1,6 +1,7 @@
 const { spawn, execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { createLogThrottle } = require('./log-throttle');
 
 function exec(cmd, args, opts = {}) {
   return new Promise((resolve) => {
@@ -28,6 +29,7 @@ class WinwsManager {
     this.proc = null;
     this.currentProfile = null;
     this.mode = 'stopped'; // 'user' | 'stopped'
+    this.logThrottle = createLogThrottle(2000);
   }
 
   async status() {
@@ -53,6 +55,9 @@ class WinwsManager {
 
     return await new Promise((resolve) => {
       try {
+        this.logThrottle = createLogThrottle(2000);
+        let stderrTail = '';
+        let exitCode = null;
         const child = spawn(parsed.exe, parsed.args, {
           cwd: path.join(this.runtimeDir, 'bin'),
           windowsHide: true,
@@ -65,8 +70,14 @@ class WinwsManager {
         let resolved = false;
         const done = (ok, msg, extra) => { if (resolved) return; resolved = true; resolve({ ok, message: msg, ...(extra||{}) }); };
 
-        child.stdout.on('data', d => this.storage.log('winws', d.toString().trim()));
-        child.stderr.on('data', d => this.storage.log('winws_err', d.toString().trim()));
+        const logChunk = (level, chunk) => {
+          const text = chunk.toString().trim();
+          if (level === 'winws_err') stderrTail = `${stderrTail}\n${text}`.slice(-2000);
+          const entry = this.logThrottle.line(text);
+          if (entry) this.storage.log(level, entry.count > 1 ? `${entry.text} (x${entry.count})` : entry.text);
+        };
+        child.stdout.on('data', d => logChunk('winws', d));
+        child.stderr.on('data', d => logChunk('winws_err', d));
         child.on('error', err => {
           this.storage.log('error', 'winws spawn error', { error: err.message, code: err.code, profile });
           this.proc = null; this.mode = 'stopped';
@@ -77,13 +88,14 @@ class WinwsManager {
           done(false, msg, { code: err.code, requiresAdmin: isAccess });
         });
         child.on('exit', (code, sig) => {
+          exitCode = code;
           this.storage.log('info', 'winws exited', { code, sig, profile });
           if (this.proc === child) { this.proc = null; this.mode = 'stopped'; }
         });
         setTimeout(async () => {
           const up = await isWinwsRunning();
           if (up) { this.storage.log('info', 'winws started (user mode)', { profile }); done(true, 'started'); }
-          else if (!resolved) done(false, 'winws не запустился. Нужны права администратора и доступ к WinDivert/драйверу. Проверьте логи.');
+          else if (!resolved) done(false, 'winws не запустился. Нужны права администратора и доступ к WinDivert/драйверу. Проверьте логи.', { exitCode, stderrTail });
         }, 1500);
       } catch (e) {
         const isAccess = e.code === 'EACCES' || e.code === 'EPERM';

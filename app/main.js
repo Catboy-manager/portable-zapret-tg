@@ -11,7 +11,7 @@ const { TgProxyManager } = require('./src/tgproxy');
 const { Monitor } = require('./src/monitor');
 const { VoiceDetector } = require('./src/voice');
 const { redact, systemInfo } = require('./src/telemetry');
-const { buildProfileMatrix, runAllProfiles, createRunToken } = require('./src/profile-matrix');
+const { buildProfileMatrix, runFullSelection, createRunToken } = require('./src/profile-matrix');
 
 Menu.setApplicationMenu(null);
 app.setName('ZapretTG');
@@ -34,6 +34,7 @@ const tg = new TgProxyManager(RUNTIME_DIR, storage);
 const voice = new VoiceDetector({});
 let monitor = null;
 let runToken = null;
+let settingsRestartPending = false;
 
 function isAdminSync() {
   try {
@@ -108,6 +109,9 @@ async function getStatus() {
     monitor: mon,
     voice: voice.snapshot(),
     stats,
+    invalidProfiles: Object.entries(stats.profiles || {})
+      .filter(([, p]) => p && p.invalid === true)
+      .map(([name]) => name),
     gameFilter: readGameFilter(RUNTIME_DIR),
     diagnostics: storage.readRecentDiagnostics(300),
     profileMatrix: buildProfileMatrix({
@@ -150,8 +154,8 @@ async function applyProfile(profileName, opts = {}) {
 
 // Starts winws/service for a profile during a full test run without writing
 // activeProfile, lastGoodProfile or the manual lock to settings.
-async function applyProfileTransient(profileName) {
-  const settings = storage.loadSettings();
+async function applyProfileTransient(profileName, settingsOverride = null) {
+  const settings = settingsOverride || storage.loadSettings();
   if (!profileName) throw new Error('profileName required');
   ensureUserLists(RUNTIME_DIR);
   const parsed = parseProfile(path.join(RUNTIME_DIR, profileName), RUNTIME_DIR);
@@ -303,7 +307,12 @@ registerHandler('saveSettings', async (_e, patch) => {
   const next = { ...cur, ...(patch||{}) , tgProxy: { ...(cur.tgProxy||{}), ...((patch||{}).tgProxy||{}) } };
   storage.saveSettings(next);
   storage.log('info', 'Settings updated');
-  if (monitor) { monitor.stop(); monitor.start(); }
+  if (runToken) {
+    settingsRestartPending = true;
+    storage.log('info', 'Settings restart deferred until full run finishes');
+  } else if (monitor) {
+    monitor.stop(); monitor.start();
+  }
   return { ok: true, settings: next };
 });
 registerHandler('applyProfile', async (_e, profileName, opts) => await applyProfile(profileName, opts || { manual: true }));
@@ -368,13 +377,15 @@ registerHandler('runAllProfiles', async () => {
     else emit(channel, redact(payload));
   };
   try {
-    const result = await runAllProfiles({
+    const frozenSettings = storage.loadSettings();
+    const result = await runFullSelection({
       profiles: getProfiles(),
-      apply: async (p) => await applyProfileTransient(p),
-      probe: (reason, runId, p) => monitor.probeOnce(reason, runId, p),
+      apply: async (p, opts) => await applyProfileTransient(p, (opts && opts.settings) || frozenSettings),
+      probe: (reason, runId, p, settings) => monitor.probeOnce(reason, runId, p, settings || frozenSettings),
       voice,
       storage,
       emit: emitRunProgress,
+      settings: frozenSettings,
       finish: async (winner) => {
         const settings = storage.loadSettings();
         settings.manualProfileLock = false;
@@ -390,6 +401,11 @@ registerHandler('runAllProfiles', async () => {
   } finally {
     monitor.resume();
     runToken = null;
+    if (settingsRestartPending) {
+      settingsRestartPending = false;
+      monitor.stop();
+      monitor.start();
+    }
   }
 });
 registerHandler('cancelRunAllProfiles', async () => {

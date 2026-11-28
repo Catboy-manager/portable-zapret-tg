@@ -85,9 +85,11 @@ test('critical target failure keeps health false even with 5 of 8 targets passin
     assert.deepEqual(check.criticalMissing, []);
     assert.equal(check.criticalOk, 2);
     assert.equal(check.criticalTotal, 5);
+    assert.deepEqual(check.failedTargets, ['YouTubeWeb', 'YouTubeVideoRedirect', 'RuTrackerMain']);
     const summary = rows.find(x => x.kind === 'check_summary');
     assert.equal(summary.overallOk, false);
     assert.equal(summary.criticalOk, 2);
+    assert.deepEqual(summary.failedTargets, ['YouTubeWeb', 'YouTubeVideoRedirect', 'RuTrackerMain']);
   } finally {
     okServer.close();
     badServer.close();

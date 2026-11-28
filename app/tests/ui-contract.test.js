@@ -93,3 +93,21 @@ test('hover help explains workflow, buttons and run caveats', () => {
     assert.ok(css.includes(selector), `missing CSS: ${selector}`);
   }
 });
+
+test('blocked-target warnings are shown as errors', () => {
+  assert.match(js, /\/провал\|заблокир\/i/);
+  assert.match(js, /blocked \? 'error'/);
+  assert.ok(html.includes('id="blockedBanner"'), 'missing #blockedBanner');
+});
+
+test('invalid profiles are surfaced in status and matrix', () => {
+  assert.match(js, /invalidProfiles/);
+  assert.match(js, /matrix-invalid/);
+  assert.match(js, /blockedBanner/);
+  assert.match(js, /исключены из авто-подбора/);
+});
+
+test('hover help explains the critical-block warning and retry', () => {
+  assert.ok(html.includes('провайдер заблокировал все методы обхода'), 'missing block warning text');
+  assert.ok(html.includes('Повторяю полный подбор'), 'missing retry text');
+});

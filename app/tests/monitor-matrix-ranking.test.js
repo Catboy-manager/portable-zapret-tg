@@ -100,3 +100,32 @@ test('passive ranking still caps candidates by candidateCount', () => {
   const got = makeMonitor(dir, st).getCandidates(st.loadSettings());
   assert.equal(got.length, 2);
 });
+
+test('invalid profiles are excluded from passive candidates', () => {
+  const profiles = ['general (A).bat', 'general (B).bat'];
+  const dir = makeRuntime(profiles);
+  const rows = rowsFor(profiles[0], true, RECENT);
+  const st = makeStorage({
+    rows,
+    stats: { [profiles[1]]: { success: 100, fail: 0, invalid: true, invalidReason: 'could not read ^!' } },
+    settings: { healthTargets: TARGETS, candidateCount: 2 },
+  });
+  const got = makeMonitor(dir, st).getCandidates(st.loadSettings());
+  assert.deepEqual(got, [profiles[0]]);
+});
+
+test('recently failed profiles rank below untested exploration', () => {
+  const profiles = ['general (A).bat', 'general (B).bat'];
+  const dir = makeRuntime(profiles);
+  const rows = rowsFor(profiles[0], true, RECENT);
+  const st = makeStorage({
+    rows,
+    stats: {
+      [profiles[0]]: { failCount: 2, lastFailTs: new Date().toISOString(), lastGoodProfile: profiles[0] },
+      [profiles[1]]: { success: 100, fail: 0, lastSuccessTs: RECENT },
+    },
+    settings: { healthTargets: TARGETS, candidateCount: 2, lastGoodProfile: profiles[0] },
+  });
+  const got = makeMonitor(dir, st).getCandidates(st.loadSettings());
+  assert.equal(got[0], profiles[1]);
+});

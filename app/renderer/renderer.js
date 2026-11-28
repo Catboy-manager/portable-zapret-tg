@@ -184,10 +184,13 @@ function renderMatrix(s) {
     body.innerHTML = `<tr><td class="diag-empty" colspan="${targets.length + 1}">Нет данных</td></tr>`;
   } else {
     const active = s.settings && s.settings.activeProfile;
+    const invalid = new Set(Array.isArray(s.invalidProfiles) ? s.invalidProfiles : []);
     body.innerHTML = profiles.map(p => {
       const mark = p.name === active ? ' ★' : '';
+      const bad = invalid.has(p.name);
+      const invalidMark = bad ? ' <span class="matrix-invalid" title="Ошибка запуска: профиль исключён из авто-подбора">⚠ невалиден</span>' : '';
       const cells = targets.map(t => `<td>${renderMatrixCell(p.cells && p.cells[t])}</td>`).join('');
-      return `<tr><td class="matrix-profile">${esc(p.name || '—')}${mark}</td>${cells}</tr>`;
+      return `<tr${bad ? ' class="matrix-row-invalid"' : ''}><td class="matrix-profile">${esc(p.name || '—')}${mark}${invalidMark}</td>${cells}</tr>`;
     }).join('');
   }
   const tested = $('matrixTested'); if (tested) tested.textContent = matrix ? matrix.testedCount : 0;
@@ -252,6 +255,15 @@ function renderStatus(s) {
     ? `Активен (${voice.endpointCount || 0} UDP)`
     : 'Нет';
   $('voiceBanner').classList.toggle('hidden', !voice.active);
+
+  const invalidProfiles = Array.isArray(s.invalidProfiles) ? s.invalidProfiles : [];
+  const blockedBanner = $('blockedBanner');
+  if (blockedBanner) {
+    blockedBanner.classList.toggle('hidden', invalidProfiles.length === 0);
+    blockedBanner.textContent = invalidProfiles.length
+      ? `Профили с ошибкой запуска исключены из авто-подбора: ${invalidProfiles.join(', ')}. Их можно применить вручную.`
+      : '';
+  }
 
   const sel = $('profileSelect');
   const currentSel = sel.value;
@@ -454,8 +466,9 @@ window.addEventListener('DOMContentLoaded', () => {
   window.api.on('check', (check) => { renderCheck(check); refresh(); });
   window.api.on('status', (data) => {
     if (data && data.message) {
-      const deferred = /discord|голос/i.test(data.message);
-      setBanner(data.message, deferred ? 'warn' : 'info');
+      const blocked = /провал|заблокир/i.test(data.message);
+      const deferred = !blocked && /discord|голос/i.test(data.message);
+      setBanner(data.message, blocked ? 'error' : deferred ? 'warn' : 'info');
     }
     refresh();
   });

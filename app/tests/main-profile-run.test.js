@@ -56,7 +56,7 @@ test('monitor pause/resume gates normal ticks', () => {
 });
 
 test('probeOnce accepts runId and profile override', () => {
-  assert.match(monitor, /async probeOnce\(reason = 'manual', runId = null, profileName = null\)/);
+  assert.match(monitor, /async probeOnce\(reason = 'manual', runId = null, profileName = null, settingsOverride = null\)/);
   assert.match(monitor, /recordDiagnostic\('check',[\s\S]*profileName\)/);
 });
 
@@ -64,4 +64,32 @@ test('preload exposes full-run methods and progress subscription', () => {
   for (const name of ['runAllProfiles', 'cancelRunAllProfiles', 'getProfileMatrix', 'onRunProgress']) {
     assert.match(preload, new RegExp(`${name}:`));
   }
+});
+
+test('full run uses the retry wrapper with frozen settings', () => {
+  assert.match(main, /runFullSelection\(/);
+  assert.match(main, /const frozenSettings = storage\.loadSettings\(\)/);
+});
+
+test('transient apply accepts frozen settings', () => {
+  const body = functionBody(main, 'applyProfileTransient');
+  assert.ok(body, 'applyProfileTransient is missing');
+  assert.match(body, /settingsOverride/);
+  assert.doesNotMatch(body, /storage\.saveSettings/);
+});
+
+test('settings updates defer monitor restart during a full run', () => {
+  const handler = main.slice(main.indexOf("registerHandler('saveSettings'"));
+  const section = handler.slice(0, handler.indexOf("registerHandler('", 1));
+  assert.match(section, /if \(runToken\)/);
+  assert.match(section, /settingsRestartPending/);
+});
+
+test('status exposes invalid profiles', () => {
+  assert.match(main, /invalidProfiles:/);
+});
+
+test('probeOnce accepts a settings override', () => {
+  assert.match(monitor, /async probeOnce\(reason = 'manual', runId = null, profileName = null, settingsOverride = null\)/);
+  assert.match(monitor, /settingsOverride \|\| this\.storage\.loadSettings\(\)/);
 });
