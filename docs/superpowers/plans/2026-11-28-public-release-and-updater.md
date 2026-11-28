@@ -1,6 +1,6 @@
 # Public release and in-app updater Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Harden the repo for public visibility, add a safe in-app updater, rebuild, publish a release asset and push.
 
@@ -32,11 +32,11 @@
 **Files:**
 - Modify: `app/src/storage.js`, `app/tests/telemetry.test.js`, `app/tests/run-all-profiles.test.js`, `app/tests/tgproxy-health.test.js`, `scripts/copy_to_linux.py`, `scripts/verify_linux_copy.py`, `docs/superpowers/**`
 
-- [ ] **Step 1: Replace the default secret with '' in storage and fixtures with TEST_SECRET_VALUE**
-- [ ] **Step 2: Replace internal IPs/users/paths in docs and scripts with placeholders**
-- [ ] **Step 3: Run `node --test tests/*.test.js` — all green**
-- [ ] **Step 4: Rewrite history with a backup ref; verify `git grep` across all commits is clean**
-- [ ] **Step 5: Commit the scrub**
+- [x] **Step 1: Replace the default secret with '' in storage and fixtures with TEST_SECRET_VALUE**
+- [x] **Step 2: Replace internal IPs/users/paths in docs and scripts with placeholders**
+- [x] **Step 3: Run `node --test tests/*.test.js` — all green**
+- [x] **Step 4: Rewrite history with a backup ref; verify `git grep` across all commits is clean**
+- [x] **Step 5: Commit the scrub**
 
 ### Task 2: Update helpers
 
@@ -50,27 +50,27 @@
 - `planUpdate(entries, preserve) -> { replace: string[], preserve: string[] }`
 - `buildApplyScript({ appRoot, stagingDir, exeName, parentPid }) -> string`
 
-- [ ] **Step 1: Write failing tests for all five helpers**
-- [ ] **Step 2: Run tests and watch them fail**
-- [ ] **Step 3: Implement helpers**
-- [ ] **Step 4: Run tests green**
+- [x] **Step 1: Write failing tests for all five helpers**
+- [x] **Step 2: Run tests and watch them fail**
+- [x] **Step 3: Implement helpers**
+- [x] **Step 4: Run tests green**
 
 ### Task 3: IPC and UI
 
 **Files:**
 - Modify: `app/main.js`, `app/preload.js`, `app/renderer/index.html`, `app/renderer/renderer.js`, `app/tests/main-update.test.js`, `app/tests/ui-contract.test.js`
 
-- [ ] **Step 1: Write failing IPC/UI contract tests**
-- [ ] **Step 2: Implement check/download/apply IPC with progress events**
-- [ ] **Step 3: Add button, banner and hover help**
-- [ ] **Step 4: Run full suite and `node --check`**
+- [x] **Step 1: Write failing IPC/UI contract tests**
+- [x] **Step 2: Implement check/download/apply IPC with progress events**
+- [x] **Step 3: Add button, banner and hover help**
+- [x] **Step 4: Run full suite and `node --check`**
 
 ### Task 4: Release and push
 
-- [ ] **Step 1: Bump `app/package.json` version to 1.2.0**
-- [ ] **Step 2: Rebuild `dist8` via sibling `dist8-icon`, preserving live config/history/logs/RUN_AS_ADMIN.txt and locked TgWsProxy**
-- [ ] **Step 3: Create `ZapretTG-1.2.0-win-x64.zip` with SHA256 in release body**
-- [ ] **Step 4: Flip repo to public via GitHub API**
-- [ ] **Step 5: Commit, annotated tag v1.2.0, push branch and tags**
-- [ ] **Step 6: Upload release asset**
-- [ ] **Step 7: Verify latest-release API response is consumable by the updater**
+- [x] **Step 1: Bump `app/package.json` version to 1.2.0**
+- [x] **Step 2: Rebuild `dist8` via sibling `dist8-icon`, preserving live config/history/logs/RUN_AS_ADMIN.txt and locked TgWsProxy**
+- [x] **Step 3: Create `ZapretTG-1.2.0-win-x64.zip` with SHA256 in release body**
+- [x] **Step 4: Flip repo to public via GitHub API**
+- [x] **Step 5: Commit, annotated tag v1.2.0, push branch and tags**
+- [x] **Step 6: Upload release asset**
+- [x] **Step 7: Verify latest-release API response is consumable by the updater**
